@@ -12,6 +12,8 @@ def scrollfeed(v):
 
 def geturls(urlspath):
     urls = []
+    if not os.path.exists(urlspath):
+        raise IOError('... URLs file \'%s\' is missing ...' % urlspath)
     with open(urlspath,'r') as h:
         for line in h.readlines():
             l = line.strip()
@@ -42,7 +44,9 @@ if __name__ == '__main__':
         with t.hidden_cursor():
             while True:
                 rfeed = rfeeds[live]
-                rfeed.printfeed()
+                for rf in rfeeds:
+                    if rf is rfeed:rf.printfeed()
+                    else:rf.getfeed()
                 with t.cbreak():
                     key = t.inkey(timeout = 0.5)
                     if   key == 'h':rfeed.scrollselected(-1)
@@ -56,6 +60,8 @@ if __name__ == '__main__':
                     elif key == ']':live = scrollfeed(1)
                     elif key == 'q':
                         for rf in rfeeds:rf.quit()
+                        for rf in rfeeds:rf.feed.stoprequest.set()
+                        for rf in rfeeds:rf.feed.join()
                         break
 
 
