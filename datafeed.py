@@ -19,7 +19,18 @@ class feedthread(threading.Thread):
         return 'title' in feed['feed']
 
 
-    def __init__(self,url,outq,inq,delay = 5):
+    @staticmethod
+    def getfeed(url,delay):
+        while True:
+            feed = feedparser.parse(url)
+            if feedthread.validate(feed):break
+            else:
+                print('... cannot yet reach url: %s ...' % self.url)
+                time.sleep(delay)
+        return feed
+
+
+    def __init__(self,url,outq,inq,delay = 10):
         threading.Thread.__init__(self)
         self.stoprequest = threading.Event()
         self.url = url
@@ -29,31 +40,23 @@ class feedthread(threading.Thread):
         self.start()
 
 
-    #def join(self,timeout = None):
-    #    #self.stoprequest.set()
-    #    threading.Thread.join(self,timeout)
-
-
     def run(self):
         last = 0
-        feed = feedparser.parse(self.url)
-        if feedthread.validate(feed):
-            self.outq.put((feed['feed']['title'],feed['feed']['updated']))
-        else:raise ValueError('... cannot reach url: %s ...' % self.url)
+        feed = feedthread.getfeed(self.url,self.delay)
+        self.outq.put((feed['feed']['title'],feed['feed']['updated']))
         uids = self.inq.get(True)
         while not self.stoprequest.isSet():
             curr = time.time()
             wait = self.delay - (curr - last)
             if wait < 0:
-                feed = feedparser.parse(self.url)
-                if feedthread.validate(feed):
-                    newes = []
-                    for e in feed['entries']:
-                        if not e['id'] in uids:
-                            newes.append(e)
-                            uids.append(e['id'])
-                    self.outq.put((newes,feed['feed']['updated']))
-                    last = curr
+                feed = feedthread.getfeed(self.url,self.delay)
+                newes = []
+                for e in feed['entries']:
+                    if not e['id'] in uids:
+                        newes.append(e)
+                        uids.append(e['id'])
+                self.outq.put((newes,feed['feed']['updated']))
+                last = curr
             else:time.sleep(0.1)
 
 
@@ -81,13 +84,23 @@ class rfeedentry(object):
         new = cls(None,outtz)
         keys = (
             'count','seen',
-            'title','source','rawtime','rawtimes',
+            'title','link','source','rawtime','rawtimes',
             'uid','users','userlinks',
                 )
         for k in keys:new.__setattr__(k,d[k])
         new.time = rfeed.tzshift(new.rawtime,outtz)
+        new.times = [new.time]
         return new
 
+
+    @staticmethod
+    def extractsource(link):
+        source = link.replace('https','').replace('http','')
+        source = source.replace('://','').replace('www.','')
+        source = source[:source.find('.')]
+        return source
+    
+    lineswhenselected = 3
 
     def __init__(self,raw,outtz):
         self.outtz = outtz
@@ -97,63 +110,64 @@ class rfeedentry(object):
             self.title = raw['title']
             soup = bs4.BeautifulSoup(raw['summary'],'lxml')
             links = soup.find_all('a')
-            self.source = links[-2].get('href')
+            self.link = links[-2].get('href')
+            self.source = rfeedentry.extractsource(self.link)
             self.rawtime = raw['updated']
             self.rawtimes = [self.rawtime]
             self.time = rfeed.tzshift(self.rawtime,outtz)
-            #self.uid = raw['title']
+            self.times = [self.time]
             self.uid = raw['id']
             self.users = [a['name'] for a in raw['authors']]
             self.userlinks = [a['href'] for a in raw['authors']]
 
 
-    def wrapline(self,largs):
-
-        texts,colors,mods,c = largs
-
-        tlens = [len(s) for s in texts]
-        j = 0
-
-        tlen = len(functools.reduce(lambda x,y : x+y,texts))
-
-        pdb.set_trace()
-
-        raise NotImplementedError
-
-
-    def output(self,t,p,j,isselected,c):
-        timestamp = self.time.strftime(rfeed.outdtformat)
+    def getcolors(self,t):
         numcolor = t.bright_cyan
-        if isselected:
-            tcolor = t.bright_red if self.seen else t.bright_green
-        else:
-            tcolor = t.red if self.seen else t.green
+        tcolor = t.red if self.seen else t.green
+        return numcolor,tcolor
 
+
+    def titlelines(self,t,j,isselected,c,x):
+        numcolor,tcolor = self.getcolors(t)
+        timestamp = self.time.strftime(rfeed.outdtformat)
+        if isselected:mods = (t.italic,t.bold,t.underline)
+        else:mods = (t.italic,t.bold)
         mods = (t.italic,t.bold,t.underline) if isselected else (t.italic,t.bold)
-
         titleline = (
             ('{0:3d} | '.format(j+1),' | '.join([timestamp,self.title])),
             (numcolor,tcolor),(t.bold,mods))
-        lines = [titleline]
+        return [titleline]
 
+
+    def linklines(self,t,j,isselected,c,x):
+        numcolor,tcolor = self.getcolors(t)
+        linkline = (
+            ('    | ',' '*19+' | '+self.source+' | '+self.link),
+            (numcolor,tcolor),(t.bold,(t.bold,t.italic)))
+        return [linkline]
+
+
+    def submissionlines(self,t,j,isselected,c,x):
+        numcolor,tcolor = self.getcolors(t)
+        subzip = zip(self.users,
+            [i.strftime(rfeed.outdtformat) for i in self.times])
+        info = ' | '.join(['{0} , {1}'.format(*i) for i in subzip])
+        line = 'Submissions ({0:d}) | {1}'.format(self.count,info)
+        subline = (
+            ('    | ',' '*19+' | '+line),
+            (numcolor,tcolor),(t.bold,(t.bold,t.italic)))
+        return [subline]
+
+
+    def output(self,t,p,j,isselected,c,x):
+        lines = self.titlelines(t,j,isselected,c,x)
         if isselected:
-            linkline = (
-                ('    | ',' '*19+' | '+self.source),
-                (numcolor,tcolor),(t.bold,t.italic))
-            lines.append(linkline)
-            submissioninfo = (self.count,self.users[0])
-            submissionline = 'Submission Count: {0:2d} | Submitter: {1}'
-            submissionline = (
-                #('    | ',' '*19+' | '+' | '.join(submissioninfo)),
-                ('    | ',' '*19+' | '+submissionline.format(*submissioninfo)),
-                (numcolor,tcolor),(t.bold,t.italic))
-            lines.append(submissionline)
-
+            lines.extend(self.linklines(t,j,isselected,c,x))
+            lines.extend(self.submissionlines(t,j,isselected,c,x))
         with t.location(0,p):
             for largs in lines:
-                #out(*self.wrapline(largs+(c,)))
-                out(*largs+(c,))
-        return -(len(lines)-1)
+                out(*largs+(c,x))
+        return len(lines)
 
 
 class rfeed(object):
@@ -167,8 +181,16 @@ class rfeed(object):
             self.selected = max(self.selected,self.position)
         elif v < 0:
             self.position = max(0,self.position+v)
-            spmax = self.position+self.t.height-len(head)-len(tail)-2
+            spmax = self.position+self.t.height
+            spmax -= len(head)+len(tail)+rfeedentry.lineswhenselected
             self.selected = min(self.selected,spmax)
+        self.printfeed()
+
+
+    def panposition(self,v):
+        panxmax = 500
+        if v > 0:self.panx = min(panxmax,self.panx+v)
+        elif v < 0:self.panx = max(0,self.panx+v)
         self.printfeed()
 
 
@@ -177,7 +199,8 @@ class rfeed(object):
         if v < 0:
             self.selected = max(self.position,self.selected+v)
         elif v > 0:
-            spmax = self.position+self.t.height-len(head)-len(tail)-2
+            spmax = self.position+self.t.height
+            spmax -= len(head)+len(tail)+rfeedentry.lineswhenselected
             self.selected = min(self.entrycount-1,spmax,self.selected+v)
         self.printfeed()
 
@@ -205,6 +228,7 @@ class rfeed(object):
             for entry in self.history:
                 time = entry.time
                 del entry.__dict__['time']
+                del entry.__dict__['times']
                 del entry.__dict__['outtz']
                 json.dump(entry.__dict__,jh)
                 jh.write(os.linesep)
@@ -254,6 +278,7 @@ class rfeed(object):
         self.entrycount = 0
         self.history = [] 
         self.position = 0
+        self.panx = 0
         self.selected = 0
         self.page = (0,(0,1))
 
@@ -287,6 +312,10 @@ class rfeed(object):
         return tail
 
 
+    def getfeedstats(self):
+        pdb.set_trace()
+
+
     def getfeed(self):
         newentries = []
         while not self.inq.empty():
@@ -300,11 +329,13 @@ class rfeed(object):
                 titles = [e.title for e in self.history]
                 if entries[j].title in titles:
                     which = titles.index(entries[j].title)
+                    self.history[which].times.append(entries[j].time)
                     self.history[which].rawtimes.append(entries[j].rawtime)
+                    self.history[which].users.extend(entries[j].users)
                     self.history[which].count += 1
-                else:
-                    self.history.insert(0,entries[j])
+                else:self.history.insert(0,entries[j])
             self.entrycount = len(self.history)
+        #self.getfeedstats()
         head = self.head()
         tail = self.tail()
         self.cache = (head,tail)
@@ -317,39 +348,44 @@ class rfeed(object):
         with self.t.location(0,0):
             for line in head:
                 out([line],[self.t.bright_cyan],[self.t.bold],c)
-
-        # j is the entry
-        # k is how many lines can be printed
-        # i is how many extra lines have been consumed
-        i,j,k = 0,self.position,self.position-len(head)-len(tail)+r
+        j,k = self.position,self.position-len(head)-len(tail)+r
         while j < k:
-            p = len(head)+i+j-self.position
+            p = len(head)+j-self.position
             if j < self.entrycount:
                 if self.page[0] == 0:
-                    z = self.history[j].output(self.t,p,j,j == self.selected,c)
-                    k += z;i -= z
+                    j += self.history[j].output(self.t,
+                        p,j,j == self.selected,c,self.panx)
                 elif self.page[0] == 1:
                     with self.t.location(0,p):
                         out(['XXX | '],[self.t.bright_cyan],[self.t.bold],c)
+                        j += 1
             else:
                 with self.t.location(0,p):
                     out(['    | '],[self.t.bright_cyan],[self.t.bold],c)
-            j += 1
-
+                    j += 1
         with self.t.location(0,r-len(tail)):
             for line in tail:
                 out([line],[self.t.bright_cyan],[self.t.bold],c)
 
 
 fseq = lambda i,s : functools.reduce(lambda x,f : f(x),[i]+list(s))
-def out(strings,colors,mods,c):
+def out(strings,colors,mods,c,panx = 0):
     '''Print a single line to stdout with specified colors and modifiers.
     colors  : list of colors 1 - 1 with strings
     mods    : list of lists of mods 1 - 1 with strings
     strings : list of strings composing a single line of output
     '''
     fill = c
-    for c,m,s in zip(colors,mods,strings):
+    keepers = []
+    for s in strings:
+        slen = len(s)
+        if panx >= slen:
+            panx -= slen
+            colors = colors[1:]
+            mods = mods[1:]
+        elif panx:keepers.append(s[panx:])
+        else:keepers.append(s)
+    for c,m,s in zip(colors,mods,keepers):
         if m is None:mod = lambda x : x
         elif type(m) in (type([]),type(())):mod = lambda x : fseq(x,m)
         else:mod = m
