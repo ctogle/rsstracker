@@ -7,6 +7,7 @@ import time
 import bs4
 import pytz
 import datetime
+import urllib
 import os
 import pdb
 
@@ -99,8 +100,35 @@ class rfeedentry(object):
         source = source.replace('://','').replace('www.','')
         source = source[:source.find('.')]
         return source
+
+
+    @staticmethod
+    def extractarticle(link):
+        req = urllib.request.Request(link,
+            headers = {'User-Agent':'Magic Browser'}) 
+        try:
+            with urllib.request.urlopen(req) as wp:
+                pagesoup = bs4.BeautifulSoup(wp.read(),'lxml')
+        except urllib.error.HTTPError:
+            print('httperror!',link)
+            pdb.set_trace()
+        ts = [t.string for t in pagesoup.find_all('title') if not t is None]
+        ps = [p.string for p in pagesoup.find_all('p') if not p is None]
+        '''#
+        htmlpagefile = os.path.join(os.getcwd(),'.rsscache','pageexample.html.txt')
+        textpagefile = os.path.join(os.getcwd(),'.rsscache','pageexample.text.txt')
+        with open(htmlpagefile,'w') as f:
+            f.write(link)
+            f.write(os.linesep)
+            f.write(pagesoup.prettify())
+        with open(textpagefile,'w') as f:
+            f.write(os.linesep.join(ps))
+        '''#
+        return ts,ps
+
     
     lineswhenselected = 3
+
 
     def __init__(self,raw,outtz):
         self.outtz = outtz
@@ -112,6 +140,7 @@ class rfeedentry(object):
             links = soup.find_all('a')
             self.link = links[-2].get('href')
             self.source = rfeedentry.extractsource(self.link)
+            #self.article = rfeedentry.extractarticle(self.link)
             self.rawtime = raw['updated']
             self.rawtimes = [self.rawtime]
             self.time = rfeed.tzshift(self.rawtime,outtz)
@@ -313,6 +342,17 @@ class rfeed(object):
 
 
     def getfeedstats(self):
+        '''
+        want to track number of posts per unit time (hr?) for
+            any users, any sources, any article links, 
+            or combinations thereof?
+
+        each unique user, source, or article link becomes a key in a dict
+        this includes an ALLUSERS, ALLSOURCES, or ALLLINKS entry
+        scanning over all entries, bin onto a time axis
+
+        produce matplotlib plots of the data?
+        '''
         pdb.set_trace()
 
 
