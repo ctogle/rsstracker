@@ -58,6 +58,7 @@ if __name__ == '__main__':
                     elif key == ',':rfeed.scrollpage(-1)
                     elif key == '.':rfeed.scrollpage(1)
                     elif key == 'c':rfeed.togglemarkselected()
+                    elif key == 'e':rfeed.expandentry()
                     elif key == '[':live = scrollfeed(-1)
                     elif key == ']':live = scrollfeed(1)
                     elif key == 'q':

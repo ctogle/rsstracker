@@ -112,8 +112,10 @@ class rfeedentry(object):
         except urllib.error.HTTPError:
             print('httperror!',link)
             pdb.set_trace()
-        ts = [t.string for t in pagesoup.find_all('title') if not t is None]
-        ps = [p.string for p in pagesoup.find_all('p') if not p is None]
+        ts = [t.string for t in pagesoup.find_all('title')]
+        ts = [i for i in ts if not i is None]
+        ps = [p.string for p in pagesoup.find_all('p')]
+        ps = [i for i in ps if not i is None]
         '''#
         htmlpagefile = os.path.join(os.getcwd(),'.rsscache','pageexample.html.txt')
         textpagefile = os.path.join(os.getcwd(),'.rsscache','pageexample.text.txt')
@@ -196,7 +198,8 @@ class rfeedentry(object):
         with t.location(0,p):
             for largs in lines:
                 out(*largs+(c,x))
-        return len(lines)
+        #return len(lines)
+        return -(len(lines)-1)
 
 
 class rfeed(object):
@@ -246,6 +249,12 @@ class rfeed(object):
         entry = self.history[self.selected]
         entry.seen = not entry.seen
         self.printfeed()
+
+
+    def expandentry(self):
+        entry = self.history[self.selected]
+        if not hasattr(entry,'article'):
+            entry.article = rfeedentry.extractarticle(entry.link)
 
 
     def quit(self):
@@ -385,24 +394,50 @@ class rfeed(object):
     def printfeed(self):
         c,r = self.t.width,self.t.height
         head,tail = self.getfeed()
+
         with self.t.location(0,0):
             for line in head:
                 out([line],[self.t.bright_cyan],[self.t.bold],c)
-        j,k = self.position,self.position-len(head)-len(tail)+r
-        while j < k:
-            p = len(head)+j-self.position
-            if j < self.entrycount:
-                if self.page[0] == 0:
-                    j += self.history[j].output(self.t,
+
+        if self.page[0] == 0:
+            i,j,k = 0,self.position,self.position-len(head)-len(tail)+r
+            while j < k:
+                p = len(head)+j+i-self.position
+                if j < self.entrycount:
+                    z = self.history[j].output(self.t,
                         p,j,j == self.selected,c,self.panx)
-                elif self.page[0] == 1:
+                    j += 1;k += z;i -= z
+                else:
                     with self.t.location(0,p):
-                        out(['XXX | '],[self.t.bright_cyan],[self.t.bold],c)
+                        out(['    | '],[self.t.bright_cyan],[self.t.bold],c,self.panx)
                         j += 1
+
+        elif self.page[0] == 1:
+            entry = self.history[self.selected]
+            if not hasattr(entry,'article'):
+                for j in range(len(head),r-len(tail)):
+                    with self.t.location(0,j):
+                        out(['XXX | '],[self.t.bright_cyan],[self.t.bold],c)
             else:
-                with self.t.location(0,p):
-                    out(['    | '],[self.t.bright_cyan],[self.t.bold],c)
+                j,k = self.position,self.position-len(head)-len(tail)+r
+                for t in entry.article[0][:1]:
+                    out(['XXX | ',t],2*[self.t.bright_cyan],2*[self.t.bold],c)
                     j += 1
+                i = j
+                while j < k:
+                    p = len(head)+j-self.position
+                    with self.t.location(0,p):
+                        if j - i < len(entry.article[1]):
+                            l = entry.article[1][j-i]
+                            out(['XXX | ',l],
+                                2*[self.t.bright_cyan],
+                                2*[self.t.bold],c,self.panx)
+                        else:
+                            out(['XXX | '],
+                                [self.t.bright_cyan],
+                                [self.t.bold],c,self.panx)
+                        j += 1
+
         with self.t.location(0,r-len(tail)):
             for line in tail:
                 out([line],[self.t.bright_cyan],[self.t.bold],c)
